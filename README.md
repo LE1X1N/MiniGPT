@@ -1,1 +1,1 @@
-# MyMinimind
+# MiniGPT

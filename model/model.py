@@ -92,17 +92,25 @@ class RMSNorm(nn.Module):
 
 # RoPE & YaRN
 def precompute_freqs_cis(dim: int, end: int=32*1024, rope_base: float=1e6, rope_scaling: Optional[dict] = None):
+    """
+    compute cosθ + i·sinθ （cis）for RoPE
+    
+    :param dim (int): dim of channels / features
+    :param end (int): max sequence length
+    :param rope_base: base number 
+    :param rope_scaling: frequency scaling configuration for inference
+    """
     freqs = 1 / (rope_base ** (torch.arange(0, dim, 2)[:dim//2].float() / dim))
     
     if rope_scaling is not None:
         # YaRN, RoPE scaling freqs
         orig_max, factor, beta_fast, beta_slow = (
             rope_scaling.get("original_max_positional_embeddings", 2048),
-            rope_scaling.get("factor", 4),
+            rope_scaling.get("factor", 4),  # max support 2048*4 sequence length
             rope_scaling.get("beta_fast", 4),
             rope_scaling.get("beta_slow", 1),
         )
-        corr_dim = next((i for i in range(dim // 2) if 2*math.pi / freqs[i] > orig_max), dim//2)
+        corr_dim = next((i for i in range(dim // 2) if 2*math.pi / freqs[i] > orig_max), dim//2)    # first rotation period that large than pre-trained orig_max  
         power = torch.arange(0, dim//2, device=freqs.device).float() / max(dim // 2 - 1, 1)
         beta = beta_slow + (beta_fast - beta_slow) * power
         scale = torch.where(
@@ -118,5 +126,32 @@ def precompute_freqs_cis(dim: int, end: int=32*1024, rope_base: float=1e6, rope_
     freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)  # [end, dim]
     return freqs_cos, freqs_sin
     
-precompute_freqs_cis(dim=4)
-# precompute_freqs_cis(dim=4096, rope_scaling=MiniGPTConfig(inference_rope_scaling=True).rope_scaling)
+
+def apply_rotary_pos_emb(q: torch.Tensor, k: torch.Tensor, sin: torch.Tensor, cos: torch.Tensor, unsqueeze_dim : int= 1):
+    """
+    apply RoPE on Q and K
+    
+    for a feature tuple (x0, x1), when apply RoPE
+    
+    [x0', =  [[cosθ, -sinθ],   * [x0
+     x1']     [sinθ, cosθ]]       x1]
+     
+     => x0' = x0 * cosθ - x1 * sinθ
+        x1' = x0 * cosθ + x1 * sinθ
+                     
+    :param q (torch.Tensor): Query matrix  (B, H, L, D)
+    :param k (torch.Tensor): Key matrix    (B, H, L, D)
+    :param sin (torch.Tensor): sinθ, (L, D)
+    :param cos (torch.Tensor): cosθ  (L, D)
+    :param unsqueeze_dim: target squeeze dimension for matching
+    """
+    
+    def rotate_half(x):
+        # [1, 2, 3, 4] -> [-3, -4, 1, 2]
+        return torch.cat([-x[..., x.shape[-1] // 2: ],  # left part
+                         x[..., : x.shape[-1] // 2]],   # right part
+                         dim= -1)
+    
+    q_embed = (q*cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)*sin.unsqueeze(unsqueeze_dim))
+    k_embed = (k*cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)*sin.unsqueeze(unsqueeze_dim))
+    return q_embed, k_embed

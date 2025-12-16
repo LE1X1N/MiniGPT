@@ -199,14 +199,14 @@ class Attention(nn.Module):
         B, L, _ = x.shape
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         
-        # split to heads
-        xq = xq.view(B, L, self.n_local_heads, self.head_dim)    
-        xk = xk.view(B, L, self.num_key_value_heads, self.head_dim)  
-        xv = xv.view(B, L, self.num_key_value_heads, self.head_dim)   
+        # split to heads and transpose (B, L, H, d) 
+        xq = xq.view(B, L, self.n_local_heads, self.head_dim)         # (B, L, H_q, d)
+        xk = xk.view(B, L, self.num_key_value_heads, self.head_dim)   # (B, L, H_kv, d)
+        xv = xv.view(B, L, self.num_key_value_heads, self.head_dim)   # (B, L, H_kv, d)
         
         # apply RoPE on Q and K    
         cos, sin = positional_embedding  
-        xq, xk = apply_rotary_pos_emb(xq, xk, cos[:L], sin[:L])
+        xq, xk = apply_rotary_pos_emb(xq, xk, cos[:L], sin[:L], unsqueeze_dim=1)
         
         # apply repeat on K and V, and also KV cache
         if past_key_value is not None:

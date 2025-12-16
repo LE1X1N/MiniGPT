@@ -74,6 +74,8 @@ class MiniGPTConfig(PretrainedConfig):
 # RMS norm
 import torch
 import torch.nn as nn
+from typing import Optional
+import math
 
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-5):
@@ -87,3 +89,34 @@ class RMSNorm(nn.Module):
     
     def forward(self, x: torch.Tensor):
         return self.weight * self._norm(x.float()).type_as(x) * x
+
+# RoPE & YaRN
+def precompute_freqs_cis(dim: int, end: int=32*1024, rope_base: float=1e6, rope_scaling: Optional[dict] = None):
+    freqs = 1 / (rope_base ** (torch.arange(0, dim, 2)[:dim//2].float() / dim))
+    
+    if rope_scaling is not None:
+        # YaRN, RoPE scaling freqs
+        orig_max, factor, beta_fast, beta_slow = (
+            rope_scaling.get("original_max_positional_embeddings", 2048),
+            rope_scaling.get("factor", 4),
+            rope_scaling.get("beta_fast", 4),
+            rope_scaling.get("beta_slow", 1),
+        )
+        corr_dim = next((i for i in range(dim // 2) if 2*math.pi / freqs[i] > orig_max), dim//2)
+        power = torch.arange(0, dim//2, device=freqs.device).float() / max(dim // 2 - 1, 1)
+        beta = beta_slow + (beta_fast - beta_slow) * power
+        scale = torch.where(
+            torch.arange(dim//2, device=freqs.device) < corr_dim,
+            (beta * factor - beta + 1) / (beta * factor), 
+            1.0 / factor
+        )
+        freqs = freqs * scale
+    
+    t = torch.arange(end, device=freqs.device)
+    freqs = torch.outer(t, freqs).float()   # [end, dim/2] 
+    freqs_cos = torch.cat([torch.cos(freqs), torch.cos(freqs)], dim=-1)  # [end, dim]
+    freqs_sin = torch.cat([torch.sin(freqs), torch.sin(freqs)], dim=-1)  # [end, dim]
+    return freqs_cos, freqs_sin
+    
+precompute_freqs_cis(dim=4)
+# precompute_freqs_cis(dim=4096, rope_scaling=MiniGPTConfig(inference_rope_scaling=True).rope_scaling)

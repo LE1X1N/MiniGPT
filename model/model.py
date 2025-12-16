@@ -210,7 +210,7 @@ class Attention(nn.Module):
         if past_key_value is not None:
             xk = torch.cat([past_key_value[0], xk], dim=1)
             xv = torch.cat([past_key_value[1], xv], dim=1)
-        past_key_value = (xk, xv) if use_cache else None   # KV cache
+        past_kv = (xk, xv) if use_cache else None   # KV cache
         
         xq = xq.transpose(1, 2) # (B, H, L, d)
         xk = repeat_kv(xk, self.n_rep).transpose(1, 2)
@@ -223,8 +223,10 @@ class Attention(nn.Module):
         
         else:
             scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim) 
-            scores = scores + torch.triu(torch.full((L, L), float('-inf'), device=scores.device), 
-                                         diagonal=1).unsqueeze(0).unsqueeze(0)
+            causal_mask = torch.triu(torch.full((L, L), float('-inf'), device=scores.device), 
+                                         diagonal=1)
+            
+            scores = scores + causal_mask.unsqueeze(0).unsqueeze(0)
             if attention_mask is not None:
                 extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
                 extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
@@ -237,7 +239,7 @@ class Attention(nn.Module):
         output = output.transpose(1, 2).reshape(B, L, -1)
         output = self.resid_dropout(self.o_proj(output))
         
-        return output, past_key_value
+        return output, past_kv
         
         
 class FeedForward(nn.Module):

@@ -198,19 +198,19 @@ class Attention(nn.Module):
         xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
         
         # split to heads
-        q = xq.view(B, L, self.n_local_heads, self.head_dim)    
-        k = xk.view(B, L, self.num_key_value_heads, self.head_dim)  
-        v = xv.view(B, L, self.num_key_value_heads, self.head_dim)   
+        xq = xq.view(B, L, self.n_local_heads, self.head_dim)    
+        xk = xk.view(B, L, self.num_key_value_heads, self.head_dim)  
+        xv = xv.view(B, L, self.num_key_value_heads, self.head_dim)   
         
         # apply RoPE on Q and K    
         cos, sin = positional_embedding  
-        xq, xk = apply_rotary_pos_emb(q, k, cos[:L], sin[:L])
+        xq, xk = apply_rotary_pos_emb(xq, xk, cos[:L], sin[:L])
         
         # apply repeat on K and V, and also KV cache
         if past_key_value is not None:
             xk = torch.cat([past_key_value[0], xk], dim=1)
             xv = torch.cat([past_key_value[1], xv], dim=1)
-        past_key_value = (xk, xv)   # KV cache
+        past_key_value = (xk, xv) if use_cache else None   # KV cache
         
         xq = xq.transpose(1, 2) # (B, H, L, d)
         xk = repeat_kv(xk, self.n_rep).transpose(1, 2)
@@ -222,7 +222,7 @@ class Attention(nn.Module):
             output = F.scaled_dot_product_attention(xq, xk, xv, attn_mask=attn_mask, dropout_p=self.dropout if self.training else 0.0, is_causal=True)
         
         else:
-            scores = (xq@xk.transpose(-2, -1)) / math.sqrt(self.head_dim) 
+            scores = (xq @ xk.transpose(-2, -1)) / math.sqrt(self.head_dim) 
             scores = scores + torch.triu(torch.full((L, L), float('-inf'), device=scores.device), 
                                          diagonal=1).unsqueeze(0).unsqueeze(0)
             if attention_mask is not None:
@@ -240,5 +240,9 @@ class Attention(nn.Module):
         return output, past_key_value
         
         
-        
-        
+class FeedForward(nn.Module):
+    def __init__(self, *args, **kwargs):
+        pass
+    
+    def forward():
+        pass

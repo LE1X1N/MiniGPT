@@ -171,7 +171,8 @@ class Attention(nn.Module):
     def __init__(self, args: MiniGPTConfig):
         super().__init__()
         
-        self.num_key_value_heads = args.num_key_value_heads if args.num_key_value_heads is None else args.num_attention_heads
+        # it num_key_value_heads is None -> MHA, else GQA
+        self.num_key_value_heads = args.num_key_value_heads if args.num_key_value_heads is not None else args.num_attention_heads
         assert args.num_attention_heads % self.num_key_value_heads == 0, "num_attention_heads must be divisible by num_key_value_heads"
         
         self.n_local_heads = args.num_attention_heads
@@ -238,7 +239,7 @@ class Attention(nn.Module):
             output = scores @ xv
         
         output = output.transpose(1, 2).reshape(B, L, -1)
-        output = self.resid_dropout(self.o_proj(output))
+        output = self.resid_dropout(self.o_proj(output)) + x
         
         return output, past_kv
         

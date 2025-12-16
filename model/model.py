@@ -12,7 +12,7 @@ class MiniGPTConfig(PretrainedConfig):
         hidden_size: int = 512,
         intermediate_size: int = None,
         max_positional_embeddings: int = 32768,
-        num_attention_heads: int = 8,
+        num_attention_heads: int = 8,   
         num_hidden_layers: int = 8,
         num_key_value_heads: int = 2,
         vocab_size: int = 6400,
@@ -76,6 +76,7 @@ import torch
 import torch.nn as nn
 from typing import Optional
 import math
+import torch.nn.functional as F
 
 class RMSNorm(nn.Module):
     def __init__(self, dim: int, eps: float = 1e-5):
@@ -155,3 +156,89 @@ def apply_rotary_pos_emb(q: torch.Tensor, k: torch.Tensor, sin: torch.Tensor, co
     q_embed = (q*cos.unsqueeze(unsqueeze_dim)) + (rotate_half(q)*sin.unsqueeze(unsqueeze_dim))
     k_embed = (k*cos.unsqueeze(unsqueeze_dim)) + (rotate_half(k)*sin.unsqueeze(unsqueeze_dim))
     return q_embed, k_embed
+
+
+def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+    if n_rep == 1:
+        return x
+     
+    B, L, H, D = x.shape    # batch_size, sequence_len, num_head, hidden_dim
+    return x[:, :, :, None, :].expand(B, L, H, n_rep, D).reshape(B, L, H*n_rep, D)
+
+
+class Attention(nn.Module):
+    def __init__(self, args: MiniGPTConfig):
+        super().__init__()
+        
+        self.num_key_value_heads = args.num_key_value_heads if args.num_key_value_heads is None else args.num_attention_heads
+        assert args.num_attention_heads % self.num_key_value_heads == 0, "num_attention_heads must be divisible by num_key_value_heads"
+        
+        self.n_local_heads = args.num_attention_heads
+        self.num_key_value_heads = args.num_key_value_heads
+        self.n_rep = self.n_local_heads // self.num_key_value_heads
+        self.head_dim = args.hidden_size // args.num_attention_heads
+        
+        self.q_proj = nn.Linear(args.hidden_size, args.num_attention_heads*self.head_dim, bias=False)
+        self.k_proj = nn.Linear(args.hidden_size, args.num_key_value_heads*self.head_dim, bias=False)
+        self.v_proj = nn.Linear(args.hidden_size, args.num_key_value_heads*self.head_dim, bias=False)
+        self.o_proj = nn.Linear(args.num_attention_heads*self.head_dim, args.hidden_size, bias=False)
+
+        self.attn_dropout = nn.Dropout(args.dropout)
+        self.resid_dropout = nn.Dropout(args.dropout)
+        self.dropout = args.dropout
+        
+        self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') and args.flash_attention
+    
+    def forward(self, x:torch.Tensor, 
+                positional_embedding: tuple[torch.Tensor, torch.Tensor],
+                past_key_value: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+                use_cache: bool=False,
+                attention_mask: Optional[torch.Tensor] = None):
+        B, L, _ = x.shape
+        xq, xk, xv = self.q_proj(x), self.k_proj(x), self.v_proj(x)
+        
+        # split to heads
+        q = xq.view(B, L, self.n_local_heads, self.head_dim)    
+        k = xk.view(B, L, self.num_key_value_heads, self.head_dim)  
+        v = xv.view(B, L, self.num_key_value_heads, self.head_dim)   
+        
+        # apply RoPE on Q and K    
+        cos, sin = positional_embedding  
+        xq, xk = apply_rotary_pos_emb(q, k, cos[:L], sin[:L])
+        
+        # apply repeat on K and V, and also KV cache
+        if past_key_value is not None:
+            xk = torch.cat([past_key_value[0], xk], dim=1)
+            xv = torch.cat([past_key_value[1], xv], dim=1)
+        past_key_value = (xk, xv)   # KV cache
+        
+        xq = xq.transpose(1, 2) # (B, H, L, d)
+        xk = repeat_kv(xk, self.n_rep).transpose(1, 2)
+        xv = repeat_kv(xv, self.n_rep).transpose(1, 2)
+        
+        # attention calculation
+        if self.flash and L>1 and (attention_mask is None or torch.all(attention_mask == 1)):
+            attn_mask = (None if attention_mask is None else attention_mask.view(B, 1, 1, -1).expand(B, self.n_local_heads, L, -1).bool())
+            output = F.scaled_dot_product_attention(xq, xk, xv, attn_mask=attn_mask, dropout_p=self.dropout if self.training else 0.0, is_causal=True)
+        
+        else:
+            scores = (xq@xk.transpose(-2, -1)) / math.sqrt(self.head_dim) 
+            scores = scores + torch.triu(torch.full((L, L), float('-inf'), device=scores.device), 
+                                         diagonal=1).unsqueeze(0).unsqueeze(0)
+            if attention_mask is not None:
+                extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+                extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
+                scores = scores + extended_attention_mask
+            
+            scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+            scores = self.attn_dropout(scores)
+            output = scores @ xv
+        
+        output = output.transpose(1, 2).reshape(B, L, -1)
+        output = self.resid_dropout(self.o_proj(output))
+        
+        return output, past_key_value
+        
+        
+        
+        

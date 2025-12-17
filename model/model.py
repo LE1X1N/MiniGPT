@@ -344,7 +344,7 @@ class MiniGPTModule(nn.Module):
             self.freqs_sin[start_pos : start_pos+L]
         )
         
-        presents = []   # present KV cache
+        presents = []   # present KV cache per layer
         
         for layer_idx, (layer, past_key_value) in enumerate(zip(self.layers, past_key_values)):
             hidden_states, present = layer(hidden_states,

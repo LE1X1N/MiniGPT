@@ -10,10 +10,10 @@ class MiniGPTConfig(PretrainedConfig):
         eos_token_id: int = 2,
         hidden_act: str = "silu",
         hidden_size: int = 512,
+        num_hidden_layers: int = 8,
         intermediate_size: int = None,
         max_positional_embeddings: int = 32768,
         num_attention_heads: int = 8,   
-        num_hidden_layers: int = 8,
         num_key_value_heads: int = 2,
         vocab_size: int = 6400,
         rms_norm_eps: float = 1e-05,
@@ -210,7 +210,7 @@ class Attention(nn.Module):
         
         # apply repeat on K and V, and also KV cache
         if past_key_value is not None:
-            xk = torch.cat([past_key_value[0], xk], dim=1)
+            xk = torch.cat([past_key_value[0], xk], dim=1)    # (B, L, H_kv, d) -> (B, L_new, H_kv, d)
             xv = torch.cat([past_key_value[1], xv], dim=1)
         past_kv = (xk, xv) if use_cache else None   # KV cache
         
@@ -278,7 +278,7 @@ class MiniGPTBlock(nn.Module):
     
     def forward(self, hidden_states: torch.Tensor,
                 positional_embeddings: torch.Tensor,
-                past_key_value: torch.Tensor = None,
+                past_key_value: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
                 use_cache : bool=False,
                 attention_mask: torch.Tensor = None):
         residual = hidden_states
@@ -294,5 +294,70 @@ class MiniGPTBlock(nn.Module):
         
         return hidden_states, present_key_value
 
+class MiniGPTModule(nn.Module):
+    def __init__(self, config: MiniGPTConfig):
+        super().__init__()
+        self.vocab_size = config.vocab_size
+        self.num_hidden_layers = config.num_hidden_layers
+        
+        self.embed_tokens = nn.Embedding(self.vocab_size, config.hidden_size)   # input embedding
+        
+        self.dropout = nn.Dropout(config.dropout)
+        self.norm = RMSNorm(config.hidden_size, config.rms_norm_eps)
+        self.layers = nn.ModuleList([
+            MiniGPTBlock(i, config) for i in range(self.num_hidden_layers)
+        ])
+        
+        # RoPE precompute
+        freqs_cos, freqs_sin = precompute_freqs_cis(
+            dim = config.hidden_size // config.num_attention_heads,
+            end = config.max_position_embeddings,
+            rope_base = config.rope_theta,
+            rope_scaling = config.rope_scaling
+        )
+        self.register_buffer("freqs_cos", freqs_cos, persistent=False)
+        self.register_buffer("freqs_sin", freqs_sin, persistent=False)
+        
+    def forward(self, 
+                input_ids: Optional[torch.Tensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                past_key_values: Optional[list[tuple[torch.Tensor, torch.Tensor]]] = None,
+                use_cache: bool = False,
+                **kwargs
+                ):
+        B, L = input_ids.shape
+        
+        if hasattr(past_key_values, 'layers'):
+            past_key_values = None
+            
+        past_key_values = past_key_values or [None]*len(self.layers)  # storing each layer's KV cache
+        
+        # past_key_values[0][0]: 0 layer, K cache of shape (B, L, H_kv, d)
+        start_pos = (
+            past_key_values[0][0].shape[1] if past_key_values[0] is not None else 0
+        )
+        
+        hidden_states = self.dropout(self.embed_tokens(input_ids))
+        
+        position_embeddings = (
+            self.freqs_cos[start_pos : start_pos+L],
+            self.freqs_sin[start_pos : start_pos+L]
+        )
+        
+        presents = []   # present KV cache
+        
+        for layer_idx, (layer, past_key_value) in enumerate(zip(self.layers, past_key_values)):
+            hidden_states, present = layer(hidden_states,
+                                            position_embeddings,
+                                            past_key_value,
+                                            use_cache,
+                                            attention_mask)
+            presents.append(present)
+        
+        hidden_states = self.norm(hidden_states)
+        
+        return hidden_states, presents
 
+        
+        
         

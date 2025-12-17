@@ -74,7 +74,7 @@ class MiniGPTConfig(PretrainedConfig):
 # RMS norm
 import torch
 import torch.nn as nn
-from typing import Optional
+from typing import Optional, Union
 import math
 import torch.nn.functional as F
 from transformers.activations import ACT2FN
@@ -358,6 +358,50 @@ class MiniGPTModule(nn.Module):
         
         return hidden_states, presents
 
+
+from transformers import PreTrainedModel, GenerationMixin
+from transformers.modeling_outputs import CausalLMOutputWithPast
+
+
+class MiniGPTForCausalLM(PreTrainedModel, GenerationMixin):
+    config_class = MiniGPTConfig
+    
+    def __init__(self, config: MiniGPTConfig):
+        self.config = config
+        super().__init__(config)
         
+        self.model = MiniGPTModule(config)
         
+        self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
         
+        # weight sharing
+        # the weight of embedding layer is the same with the projection head
+        self.model.embed_tokens.weight = self.lm_head.weight
+        
+        self.OUT = CausalLMOutputWithPast()
+        
+    def forward(self, 
+                input_ids: Optional[torch.Tensor] = None,
+                attention_mask: Optional[torch.Tensor] = None,
+                past_key_values: Optional[list[tuple[torch.Tensor, torch.Tensor]]] = None,
+                use_cache: bool = False,
+                logits_to_keep: Union[int, torch.Tensor] = 0,
+                **args):
+        hidden_states, past_key_values = self.model(
+            input_ids,
+            attention_mask,
+            past_key_values,
+            use_cache,
+            **args)    
+        
+        # if logits_to_keep is an interger, thus we only retains the last target positions.
+        slice_indices = (slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep)
+           
+        logits = self.lm_head(hidden_states[:, slice_indices, :])
+        
+        self.OUT.__setitem__("last_hidden_state", hidden_states)
+        self.OUT.__setitem__("logits", logits)
+        self.OUT.__setitem__("past_key_values", past_key_values)
+        
+        return self.OUT
+    

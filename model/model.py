@@ -239,7 +239,7 @@ class Attention(nn.Module):
             output = scores @ xv
         
         output = output.transpose(1, 2).reshape(B, L, -1)
-        output = self.resid_dropout(self.o_proj(output)) + x
+        output = self.resid_dropout(self.o_proj(output))
         
         return output, past_kv
         
@@ -293,5 +293,6 @@ class MiniGPTBlock(nn.Module):
         hidden_states = self.mlp(self.post_attention_layernorm(hidden_states)) + hidden_states
         
         return hidden_states, present_key_value
-        
+
+
         

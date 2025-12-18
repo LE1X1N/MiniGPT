@@ -87,10 +87,10 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
     
     def _norm(self, x: torch.Tensor):
-        return torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
     
     def forward(self, x: torch.Tensor):
-        return self.weight * self._norm(x.float()).type_as(x) * x
+        return self.weight * self._norm(x.float()).type_as(x)
 
 # RoPE & YaRN
 def precompute_freqs_cis(dim: int, end: int=32*1024, rope_base: float=1e6, rope_scaling: Optional[dict] = None):

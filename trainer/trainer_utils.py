@@ -99,7 +99,7 @@ def lm_checkpoint(
         os.replace(resume_tmp, resume_path)
     
     else:
-        # load mode
+        # load mode, resume training
         if os.path.exists(resume_path):
             ckp_data = torch.load(resume_path, map_location="cpu")
             saved_ws = ckp_data.get("world_size", 1)
@@ -139,7 +139,7 @@ def init_model(lm_config, from_weight="pretrain", tokenizer_path=None, save_dir=
     return model.to(device), tokenzier
 
 
-class SkipBatchSample(Sampler):
+class SkipBatchSampler(Sampler):
     def __init__(self, sampler, batch_size, skip_batches = 0):
         self.sampler = sampler
         self.batch_size = batch_size

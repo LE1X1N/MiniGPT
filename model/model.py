@@ -381,8 +381,6 @@ class MiniGPTForCausalLM(PreTrainedModel, GenerationMixin):
         # the weight of embedding layer is the same with the projection head
         self.model.embed_tokens.weight = self.lm_head.weight
         
-        self.OUT = CausalLMOutputWithPast()
-        
     def forward(self, 
                 input_ids: Optional[torch.Tensor] = None,
                 attention_mask: Optional[torch.Tensor] = None,
@@ -400,11 +398,11 @@ class MiniGPTForCausalLM(PreTrainedModel, GenerationMixin):
         # if logits_to_keep is an interger, thus we only retains the last target positions.
         slice_indices = (slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep)
            
-        logits = self.lm_head(hidden_states[:, slice_indices, :])
+        logits = self.lm_head(hidden_states[:, slice_indices, :])   # (B, L, V), V for vocab size, before softmax
         
-        self.OUT.__setitem__("last_hidden_state", hidden_states)
-        self.OUT.__setitem__("logits", logits)
-        self.OUT.__setitem__("past_key_values", past_key_values)
-        
-        return self.OUT
+        return CausalLMOutputWithPast(
+            logits=logits, 
+            past_key_values=past_key_values,
+            hidden_states=hidden_states
+        )
     

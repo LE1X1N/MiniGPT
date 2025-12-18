@@ -178,7 +178,6 @@ class Attention(nn.Module):
         assert args.num_attention_heads % self.num_key_value_heads == 0, "num_attention_heads must be divisible by num_key_value_heads"
         
         self.n_local_heads = args.num_attention_heads
-        self.num_key_value_heads = args.num_key_value_heads
         self.n_rep = self.n_local_heads // self.num_key_value_heads
         self.head_dim = args.hidden_size // args.num_attention_heads
         
@@ -194,7 +193,7 @@ class Attention(nn.Module):
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention') and args.flash_attention
     
     def forward(self, x:torch.Tensor, 
-                positional_embedding: tuple[torch.Tensor, torch.Tensor],
+                positional_embeddings: tuple[torch.Tensor, torch.Tensor],
                 past_key_value: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
                 use_cache: bool=False,
                 attention_mask: Optional[torch.Tensor] = None):
@@ -207,7 +206,7 @@ class Attention(nn.Module):
         xv = xv.view(B, L, self.num_key_value_heads, self.head_dim)   # (B, L, H_kv, d)
         
         # apply RoPE on Q and K    
-        cos, sin = positional_embedding  
+        cos, sin = positional_embeddings  
         xq, xk = apply_rotary_pos_emb(xq, xk, cos[:L], sin[:L], unsqueeze_dim=1)
         
         # apply repeat on K and V, and also KV cache

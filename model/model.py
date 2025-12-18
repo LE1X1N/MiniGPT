@@ -295,9 +295,11 @@ class MiniGPTBlock(nn.Module):
         
         return hidden_states, present_key_value
 
-class MiniGPTModule(nn.Module):
+class MiniGPTModel(nn.Module):
     def __init__(self, config: MiniGPTConfig):
         super().__init__()
+        self.config = config
+        
         self.vocab_size = config.vocab_size
         self.num_hidden_layers = config.num_hidden_layers
         
@@ -371,7 +373,7 @@ class MiniGPTForCausalLM(PreTrainedModel, GenerationMixin):
         self.config = config
         super().__init__(config)
         
-        self.model = MiniGPTModule(config)
+        self.model = MiniGPTModel(config)
         
         self.lm_head = nn.Linear(self.config.hidden_size, self.config.vocab_size, bias=False)
         

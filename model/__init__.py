@@ -1,3 +1,3 @@
-from .model import MiniGPTForCausalLM
+from .model import MiniGPTForCausalLM, MiniGPTConfig
 
-__all__ = ["MiniGPTForCausalLM"]
+__all__ = ["MiniGPTForCausalLM", "MiniGPTConfig"]

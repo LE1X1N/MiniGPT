@@ -45,7 +45,7 @@ class PretrainDataset(Dataset):
         # [x1, x2, x3, x4] -> [x2, x3, x4, x5]
         x = torch.tensor(input_ids[:-1], dtype=torch.long)  # ignore the last token
         y = torch.tensor(input_ids[1:], dtype=torch.long)   # ignore the first token
-        loss_mask = torch.tensor(loss_mask[1:], dtype=torch.long)
+        loss_mask = torch.tensor(loss_mask[1:], dtype=torch.long)   # ignore padding
         
         return x, y, loss_mask
         

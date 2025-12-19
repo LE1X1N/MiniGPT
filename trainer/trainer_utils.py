@@ -134,7 +134,7 @@ def init_model(lm_config, from_weight="pretrain", tokenizer_path=None, save_dir=
         model.load_state_dict(weights, strict=False)
     
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f" Trainable parameter: {total_params / 1e6:.3f} B")
+    print(f" Trainable parameter: {total_params / 1e6:.3f} M")
     
     return model.to(device), tokenzier
 

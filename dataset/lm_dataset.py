@@ -43,16 +43,14 @@ class PretrainDataset(Dataset):
             return_tensors = "pt"
         )
         
-        input_ids = encoding["input_ids"].squeeze()
-        
-        loss_mask = input_ids != self.tokenizer.pad_token_id # 1 for valid tokens
-        
+        input_ids = encoding["input_ids"].squeeze()  # (1, L_max) -> (L_max)
+    
         # autoregressive
         # [x1, x2, x3, x4] -> [x2, x3, x4, x5]
-        x = torch.tensor(input_ids[:-1], dtype=torch.long)  # ignore the last token
-        y = torch.tensor(input_ids[1:], dtype=torch.long)   # ignore the first token
-        loss_mask = torch.tensor(loss_mask[1:], dtype=torch.long)   # ignore padding
-        
+        x = input_ids[:-1].to(dtype=torch.long)  # ignore the last token
+        y = input_ids[1:].to(dtype=torch.long)   # ignore the first token
+        loss_mask = encoding["attention_mask"].squeeze()[1:].to(dtype=torch.long)   # ignore padding
+         
         return x, y, loss_mask
         
         

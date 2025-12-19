@@ -19,7 +19,7 @@ class MiniGPTConfig(PretrainedConfig):
         rms_norm_eps: float = 1e-05,
         rope_theta: int = 1e6,
         inference_rope_scaling: bool = False,
-        flash_attention: bool = True,
+        flash_attention: bool = False,
         
         ############# MoE ################
         use_moe: bool = False,

@@ -37,9 +37,10 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
         
         # mix precision for forward pass (model + loss)
         with autocast_ctx:  
-            res = model(X)  # forward
+            res = model(X)      # forward,  (B, L, V)
             
-            # X: [B, L, V] -> [B*L, V];
+            # input: [B, L, V] -> [B*L, V] 
+            # target: [B, L] -> [B*L]
             loss = loss_fct(res.logits.view(-1, res.logits.size(-1)), Y.view(-1)).view(Y.size())
             loss = (loss*loss_mask).sum() / loss_mask.sum()
             
@@ -58,21 +59,17 @@ def train_epoch(epoch, loader, iters, start_step=0, wandb=None):
 
         # log
         if step % args.log_interval == 0 or step == iters - 1:
-                    spend_time = time.time() - start_time
-                    current_loss = loss.item() * args.accumulation_steps  # 恢复真实损失值
-                    current_lr = optimizer.param_groups[-1]["lr"]  # 当前学习率
+            spend_time = time.time() - start_time
+            current_loss = loss.item() * args.accumulation_steps  # 恢复真实损失值
+            current_lr = optimizer.param_groups[-1]["lr"]  # 当前学习率
 
-                    eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
+            eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
 
-                    Logger(
-                        f"Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}) loss:{current_loss:.6f} lr:{current_lr:.12f} epoch_Time:{eta_min}min:"
-                    )
+            Logger(f"Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}) loss:{current_loss:.6f} lr:{current_lr:.12f} epoch_Time:{eta_min}min:")
 
-                    # 记录到实验跟踪系统
-                    if wandb:
-                        wandb.log(
-                            {"loss": current_loss, "lr": current_lr, "epoch_Time": eta_min}
-                        )
+            # 记录到实验跟踪系统
+            if wandb:
+                wandb.log({"loss": current_loss, "lr": current_lr, "epoch_Time": eta_min})
 
         if (step % args.save_interval == 0 or step == iters - 1) and is_main_process():
             model.eval()  # 切换到评估模式

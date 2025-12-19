@@ -114,8 +114,8 @@ if __name__ == "__main__":
     # ========== Basic Training Arguments ==========
     parser.add_argument("--save_dir", type=str, default="out", help="模型保存目录")
     parser.add_argument("--save_weight", default="pretrain", type=str, help="保存权重的前缀名")
-    parser.add_argument("--epochs", type=int, default=1, help="训练轮数（建议1轮zero或2-6轮充分训练）")
-    parser.add_argument("--batch_size", type=int, default=32, help="batch size")
+    parser.add_argument("--epochs", type=int, default=4, help="训练轮数（建议1轮zero或2-6轮充分训练）")
+    parser.add_argument("--batch_size", type=int, default=128, help="batch size")
     parser.add_argument("--learning_rate", type=float, default=5e-4, help="initial learning rate")
 
     # ========== Hardware Arguments ==========
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--accumulation_steps", type=int, default=8, help="梯度累积步数")
     parser.add_argument("--grad_clip", type=float, default=1.0, help="梯度裁剪阈值")
     parser.add_argument("--log_interval", type=int, default=100, help="日志打印间隔")
-    parser.add_argument("--save_interval", type=int, default=100, help="模型保存间隔")
+    parser.add_argument("--save_interval", type=int, default=1000, help="模型保存间隔")
 
     # ========== Model Architecture Arguments ==========
     parser.add_argument("--hidden_size", default=512, type=int, help="隐藏层维度")

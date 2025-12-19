@@ -229,13 +229,13 @@ class Attention(nn.Module):
             causal_mask = torch.triu(torch.full((L, L), float('-inf'), device=scores.device), 
                                          diagonal=1)
             
-            scores = scores + causal_mask.unsqueeze(0).unsqueeze(0)
+            scores = scores + causal_mask.unsqueeze(0).unsqueeze(0)      # (B, H_q, L, L)
             if attention_mask is not None:
                 extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
                 extended_attention_mask = (1.0 - extended_attention_mask) * -1e9
                 scores = scores + extended_attention_mask
             
-            scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+            scores = F.softmax(scores.float(), dim=-1).type_as(xq)     # -inf -> softmax -> 0
             scores = self.attn_dropout(scores)
             output = scores @ xv
         

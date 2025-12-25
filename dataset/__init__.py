@@ -1,3 +1,3 @@
-from .lm_dataset import PretrainDataset
+from .lm_dataset import PretrainDataset, SFTDataset
 
-__all__ = ["PretrainDataset"]
+__all__ = ["PretrainDataset", "SFTDataset"]

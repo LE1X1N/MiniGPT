@@ -62,14 +62,23 @@ def main():
     prompt_iter = prompts if input_mode == 0 else iter(lambda: input('👶: '), '')
     for prompt in prompt_iter:
         setup_seed(2026) # or setup_seed(random.randint(0, 2048))
-        if input_mode == 0: print(f'👶: {prompt}')
+        
+        if input_mode == 0: 
+            print(f'👶: {prompt}')
+        
         conversation = conversation[-args.historys:] if args.historys else []
         conversation.append({"role": "user", "content": prompt})
 
         templates = {"conversation": conversation, "tokenize": False, "add_generation_prompt": True}
-        if args.weight == 'reason': templates["enable_thinking"] = True # 仅Reason模型使用
-        inputs = tokenizer.apply_chat_template(**templates) if args.weight != 'pretrain' else (tokenizer.bos_token + prompt)
-        inputs = tokenizer(inputs, return_tensors="pt", truncation=True).to(args.device)
+        if args.weight == 'reason': 
+            templates["enable_thinking"] = True # 仅Reason模型使用
+    
+        # apply tempalte
+        if args.weight == 'pretrain':
+            inputs = tokenizer.bos_token + prompt
+        else:    
+            inputs = tokenizer.apply_chat_template(**templates)
+        inputs = tokenizer(inputs, return_tensors="pt", truncation=True).to(args.device)    # tokenize
 
         print('🤖️: ', end='')
         generated_ids = model.generate(

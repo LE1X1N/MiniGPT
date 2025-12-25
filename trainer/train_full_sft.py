@@ -2,8 +2,19 @@
 script for supervised finetuning
 """
 
+import os
+import sys
+__package__ = "trainer"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import torch
+import torch.distributed as dist
+from contextlib import nullcontext
+
 import argparse
+
+from model import MiniGPTConfig
+from .trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 
 if __name__ == "__main__":
@@ -36,7 +47,7 @@ if __name__ == "__main__":
     # Data & Model 
     parser.add_argument("--data_path", type=str, default="../dataset/sft_mini_512.jsonl", help="SFT训练数据路径")
     parser.add_argument("--from_weight", type=str, default="pretrain", help="基础模型类型权重") # default SFT on pretrain model
-    parser.add_argument("--from_resume", default=0, type=int, choices=[0, 1], help="是否开启自动续训（0:False, 1:True）")
+    parser.add_argument("--from_resume", default=1, type=int, choices=[0, 1], help="是否开启自动续训（0:False, 1:True）")
     
     # Experiments
     parser.add_argument("--use_wandb", action="store_true", help="是否使用wandb监控实验")
@@ -44,3 +55,28 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
    
+   
+    # 1.  config env and seed
+    local_rank = init_distributed_mode()
+    if dist.is_initialized():
+        args.device = f"cuda:{local_rank}"
+    setup_seed(42 + (dist.get_rank() if dist.is_initialized() else 0))
+    
+    # 2. dir, params and ckpt
+    os.makedirs(args.save_dir, exist_ok=True)
+    lm_config = MiniGPTConfig(hidden_size=args.hidden_size, num_hidden_layers=args.num_hidden_layers, use_moe=bool(args.use_moe))
+    ckp_data = lm_checkpoint(lm_config, weight=args.save_weight, save_dir="../checkpoints") if args.from_resume==1 else None
+
+    # 3. mix dtype
+    device_type = "cuda" if "cuda" in args.device else "cpu"
+    dtype = torch.bfloat16 if args.dtype == "bfloat16" else torch.float16
+    autocast_ctx = torch.amp.autocast(device_type=device_type, dtype=dtype)
+    
+    # 4. wandb config
+    wandb = None
+    if args.use_wandb and is_main_process():
+        import swanlab as wandb
+        wandb_id = ckp_data.get('wandb_id') if ckp_data else None
+        resume = 'must' if wandb_id else None
+        wandb_run_name = f"MiniGPT-Full-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
+        wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)

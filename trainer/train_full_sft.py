@@ -86,7 +86,7 @@ def train_epoch(epoch ,loader, iters, start_step=0, wandb=None):
             
             torch.save(state_dict, ckp)
             lm_checkpoint(lm_config, weight=args.save_weight, model=model, optimizer=optimizer, 
-                         epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints', scaler=scaler)
+                         epoch=epoch, step=step, wandb=wandb, save_dir='checkpoints', scaler=scaler)
             
             model.train()
 
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MiniGPT Full SFT")
     
     # Base Training Arguments
-    parser.add_argument("--save_dir", type=str, default="../out", help="模型保存目录")
+    parser.add_argument("--save_dir", type=str, default="out", help="模型保存目录")
     parser.add_argument("--save_weight", type=str, default="full_sft", help="保存权重的前缀名")
     parser.add_argument("--epochs", type=int, default=2, help="训练轮次（通常2-5）")
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size (SFT通常使用小batch)")

@@ -9,11 +9,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import torch
 import torch.distributed as dist
-from contextlib import nullcontext
+from torch import optim
+from torch.nn.parallel import DistributedDataParallel
+from torch.utils.data import DistributedSampler, DataLoader
 
 import argparse
 
 from model import MiniGPTConfig
+from dataset import PretrainDataset
 from .trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 
@@ -45,7 +48,7 @@ if __name__ == "__main__":
     parser.add_argument("--use_moe", default=0, type=int, choices=[0, 1], help="是否开启MoE架构（0:False, 1: True）")
     
     # Data & Model 
-    parser.add_argument("--data_path", type=str, default="../dataset/sft_mini_512.jsonl", help="SFT训练数据路径")
+    parser.add_argument("--data_path", type=str, default="dataset/sft_mini_512.jsonl", help="SFT训练数据路径")
     parser.add_argument("--from_weight", type=str, default="pretrain", help="基础模型类型权重") # default SFT on pretrain model
     parser.add_argument("--from_resume", default=1, type=int, choices=[0, 1], help="是否开启自动续训（0:False, 1:True）")
     
@@ -80,3 +83,48 @@ if __name__ == "__main__":
         resume = 'must' if wandb_id else None
         wandb_run_name = f"MiniGPT-Full-SFT-Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
+
+    # 5. model, data and optimizer
+    model, tokenizer = init_model(lm_config, args.from_weight, device=args.device)
+    train_ds = PretrainDataset(args.data_path, tokenizer, args.max_seq_len)
+    train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
+    scaler = torch.amp.GradScaler("cuda", enabled=(args.dtype == 'float16'))
+    optimizer = optim.AdamW(model.parameters(), lr = args.learning_rate)
+    
+    # 6. load from ckpt
+    start_epoch, start_step = 0, 0
+    if ckp_data:
+        model.load_state_dict(ckp_data['model'])
+        optimizer.load_state_dict(ckp_data['optimizer'])
+        scaler.load_state_dict(ckp_data['scaler'])
+        start_epoch = ckp_data['epoch']
+        start_step = ckp_data['step', 0]
+    
+    # 7. DDP
+    if dist.is_initialized():
+        model._ddp_params_and_buffers_to_ignore = {"freqs_cos", "freqs_sin"}
+        model = DistributedDataParallel(model, device_ids=[local_rank])
+        
+    # 8. begain training
+    for epoch in range(start_epoch, args.epochs):
+        if train_sampler:
+            train_sampler.set_epoch(epoch)
+        
+        if epoch == start_epoch and start_step > 0:
+            # exits ckpt
+            batch_sampler = SkipBatchSampler(sampler=train_sampler or range(len(train_ds)),
+                                             batch_size=args.batch_size,
+                                             skip_batches=start_step+1)
+            loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True)
+            Logger(f'Epoch [{epoch + 1}/{args.epochs}]: Exclude {start_step} stepes before and training from  step {start_step + 1}')
+            
+            train_epoch(epoch, loader, len(loader)+start_step+1, start_step, wandb)
+        else:
+            loader = DataLoader(train_ds, batch_size=args.batch_size, 
+                                shuffle=(train_sampler is None), sampler=train_sampler,
+                                num_workers=args.num_workers, pin_memory=True)
+            
+            train_epoch(epoch, loader, len(loader), 0, wandb)
+            
+        
+            

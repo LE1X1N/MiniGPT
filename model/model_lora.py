@@ -1,5 +1,5 @@
 import torch
-from torch import optim, nn
+from torch import nn
 
 
 class LoRA(nn.Module):

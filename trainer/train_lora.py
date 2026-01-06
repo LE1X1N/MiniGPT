@@ -109,26 +109,27 @@ if __name__ == "__main__":
         else:
             param.requires_grad = False
     
+    # 6. dataset and optimizer
     train_ds = SFTDataset(args.data_path, tokenizer, args.max_seq_len)
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler("cuda", enabled=(args.dtype == 'float16'))
-    optimizer = optim.AdamW(model.parameters(), lr = args.learning_rate)
+    optimizer = optim.AdamW(lora_params, lr = args.learning_rate)   # only train lora
     
-    # 6. load from ckpt
+    # 7. load from ckpt
     start_epoch, start_step = 0, 0
     if ckp_data:
-        model.load_state_dict(ckp_data['model'])
+        model.load_state_dict(ckp_data['model'], strict=False)
         optimizer.load_state_dict(ckp_data['optimizer'])
         scaler.load_state_dict(ckp_data['scaler'])
         start_epoch = ckp_data['epoch']
         start_step = ckp_data['step', 0]
     
-    # 7. DDP
+    # 8. DDP
     if dist.is_initialized():
         model._ddp_params_and_buffers_to_ignore = {"freqs_cos", "freqs_sin"}
         model = DistributedDataParallel(model, device_ids=[local_rank])
         
-    # 8. begain training
+    # 9. begain training
     for epoch in range(start_epoch, args.epochs):
         if train_sampler:
             train_sampler.set_epoch(epoch)
@@ -141,10 +142,10 @@ if __name__ == "__main__":
             loader = DataLoader(train_ds, batch_sampler=batch_sampler, num_workers=args.num_workers, pin_memory=True)
             Logger(f'Epoch [{epoch + 1}/{args.epochs}]: Exclude {start_step} stepes before and training from  step {start_step + 1}')
             
-            train_epoch(epoch, loader, len(loader)+start_step+1, start_step, wandb)
+            train_epoch(epoch, loader, len(loader)+start_step+1, lora_params, start_step, wandb)
         else:
             loader = DataLoader(train_ds, batch_size=args.batch_size, 
                                 shuffle=(train_sampler is None), sampler=train_sampler,
                                 num_workers=args.num_workers, pin_memory=True)
             
-            train_epoch(epoch, loader, len(loader), 0, wandb)
+            train_epoch(epoch, loader, len(loader), lora_params, 0, wandb)

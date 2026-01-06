@@ -18,6 +18,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DistributedSampler, DataLoader
 
 from model import MiniGPTConfig
+from model import apply_lora
 from dataset import SFTDataset
 from .trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
@@ -88,8 +89,18 @@ if __name__ == "__main__":
         wandb_run_name = f"MiniGPT-LoRA-{args.lora_name}--Epoch-{args.epochs}-BatchSize-{args.batch_size}-LearningRate-{args.learning_rate}"
         wandb.init(project=args.wandb_project, name=wandb_run_name, id=wandb_id, resume=resume)
 
-    # 5. model, data and optimizer
+    # 5. Load model and apply LoRA
     model, tokenizer = init_model(lm_config, args.from_weight, device=args.device)
+    apply_lora(model)
+    
+    # count params
+    total_params_count = sum(p.numel() for p in model.parameters())
+    lora_params_count = sum(p.numel() for name, p in model.named_parameters() if 'lora' in name)
+    Logger(f"Params of MiniGPT: {total_params_count / 1e6:.3f} M")
+    Logger(f"Params of LoRA: {lora_params_count / 1e6:.3f} M")
+    Logger(f"Proportion or LoRA: {lora_params_count / total_params_count * 100:.2f}%")
+    
+    
     train_ds = SFTDataset(args.data_path, tokenizer, args.max_seq_len)
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None
     scaler = torch.amp.GradScaler("cuda", enabled=(args.dtype == 'float16'))

@@ -100,6 +100,14 @@ if __name__ == "__main__":
     Logger(f"Params of LoRA: {lora_params_count / 1e6:.3f} M")
     Logger(f"Proportion or LoRA: {lora_params_count / total_params_count * 100:.2f}%")
     
+    # freeze non-lora params
+    lora_params = []    # trainables parameters
+    for name, param in model.named_parameters():
+        if 'lora' in name:
+            param.requires_grad = True
+            lora_params.append(param)
+        else:
+            param.requires_grad = False
     
     train_ds = SFTDataset(args.data_path, tokenizer, args.max_seq_len)
     train_sampler = DistributedSampler(train_ds) if dist.is_initialized() else None

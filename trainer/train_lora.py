@@ -18,11 +18,65 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.data import DistributedSampler, DataLoader
 
 from model import MiniGPTConfig
-from model import apply_lora
+from model import apply_lora, save_lora
 from dataset import SFTDataset
 from .trainer_utils import get_lr, Logger, is_main_process, lm_checkpoint, init_distributed_mode, setup_seed, init_model, SkipBatchSampler
 
 
+def train_epoch(epoch ,load, iters, lora_params, start_step=0, wandb=None):
+    loss_func = nn.CrossEntropyLoss(reduction='none')
+    start_time = time.time()
+    
+    for step, (X, Y, loss_mask) in enumerate(loader, start=start_step+1):
+        X = X.to(args.device)
+        Y = Y.to(args.device)
+        loss_mask = loss_mask.to(args.device)
+        
+        lr = get_lr(epoch * iters + step, args.epochs * iters, args.learning_rate)
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+            
+        with autocast_ctx:
+            res = model(X)
+            loss = loss_func(res.logits.view(-1, res.logits.size(-1)),
+                             Y.view(-1)).view(Y.size())
+            logits_loss = (loss * loss_mask).sum() / loss_mask.sum()
+            loss = logits_loss
+            loss = loss / args.accumulation_steps
+        
+        scaler.scale(loss).backward()
+        
+        if (step + 1) % args.accumulation_steps == 0:
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(lora_params, args.grad_clip)
+
+            scaler.step(optimizer)
+            scaler.update()
+
+            optimizer.zero_grad(set_to_none=True)
+
+        if step % args.log_interval == 0 or step == iters - 1:
+            spend_time = time.time() - start_time
+            current_loss = loss.item() * args.accumulation_steps
+            current_logits_loss = logits_loss.item()
+            current_aux_loss = res.aux_loss.item()
+            current_lr = optimizer.param_groups[-1]['lr']
+            eta_min = spend_time / (step + 1) * iters // 60 - spend_time // 60
+            
+            Logger(f'Epoch:[{epoch + 1}/{args.epochs}]({step}/{iters}), loss: {current_loss:.4f}, logits_loss: {current_logits_loss:.4f}, aux_loss: {current_aux_loss:.4f}, learning_rate: {current_lr:.8f}, epoch_time: {eta_min:.3f}min')
+            
+            if wandb: 
+                wandb.log({"loss": current_loss, "logits_loss": current_logits_loss, "aux_loss": current_aux_loss, "learning_rate": current_lr, "epoch_time": eta_min})
+
+        if (step % args.save_interval == 0 or step == iters - 1) and is_main_process():
+            model.eval()
+            lora_save_path = f'{args.save_dir}/{args.lora_name}_{lm_config.hidden_size}.pth'
+            save_lora(model, lora_save_path)    # only save lora params
+            lm_checkpoint(lm_config, weight=args.lora_name, model=model, optimizer=optimizer, scaler=scaler, epoch=epoch, step=step, wandb=wandb, save_dir='../checkpoints')
+            model.train()
+
+        del X, Y, loss_mask, res, loss
+        
 
 
 if __name__ == "__main__":
